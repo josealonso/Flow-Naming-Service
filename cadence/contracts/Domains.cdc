@@ -5,6 +5,13 @@ import FlowToken from "./tokens/FlowToken.cdc"
 // The Domains contract defines the Domains NFT Collection
 // to be used by flow-name-service
 pub contract Domains: NonFungibleToken {
+
+    pub event DomainBioChanged(nameHash: String, bio: String)
+    pub event DomainAddressChanged(nameHash: String, address: Address)
+
+    pub let owners: {String: Address}  // nameHash will be the key
+    pub let expirationTimes: {String: UFix64}
+    
     pub struct DomainInfo {
         pub let id: UInt64
         pub let owner: Address
@@ -35,6 +42,52 @@ pub contract Domains: NonFungibleToken {
             self.bio = bio,
             self.createdAt = createdAt,
         }        
+    }
+
+    // Checks if a domain is available for sale
+    pub fun isAvailable(nameHash: String): Bool {
+      if self.owners[nameHash] == nil {
+        return true
+    }
+      return self.isExpired(nameHash: nameHash)
+    }
+
+    // Returns the expiry time for a domain
+    pub fun getExpirationTime(nameHash: String): UFix64? {
+      return self.expirationTimes[nameHash]
+    }
+
+    // Checks if a domain is expired
+    pub fun isExpired(nameHash: String): Bool {
+      let currTime = getCurrentBlock().timestamp
+      let expTime = self.expirationTimes[nameHash]
+      if expTime != nil {
+        return currTime >= expTime!
+      }
+      return false
+    }
+
+    // Returns the entire `owners` dictionary
+    pub fun getAllOwners(): {String: Address} {
+      return self.owners
+    }
+
+    // Returns the entire `expirationTimes` dictionary
+    pub fun getAllExpirationTimes(): {String: UFix64} {
+      return self.expirationTimes
+    }
+
+    /*  NOTE access(self) allows the code within the smart contract to access that function/variable,
+             whereas access(account) allows the account to access the function/variable - which includes the code itself as well.
+    */
+    // Update the owner of a domain
+    access(account) fun updateOwner(nameHash: String, address: Address) {
+      self.owners[nameHash] = address
+    }
+
+    // Update the expiration time of a domain
+    access(account) fun updateExpirationTime(nameHash: String, expTime: UFix64) {
+      self.expirationTimes[nameHash] = expTime
     }
 
     pub resource interface DomainPublic {
@@ -91,12 +144,38 @@ pub contract Domains: NonFungibleToken {
 
         pub fun setBio(bio: String) {
             // Ensure that the domain has not crossed its expire date
-            return 
+            // A 'pre'-check to running this function
+            // If the condition is not valid, it will throw the given error
+            pre {
+              Domains.isExpired(nameHash: self.nameHash) == false : "Domain is expired"  // Ask
+            }
+            self.bio = bio
+            emit DomainBioChanged(nameHash: self.nameHash, bio: bio)
         }
 
         pub fun setAddress(addr: Address) {
             // Ensure that the domain has not crossed its expire date
-            return 
+            pre {
+              Domains.isExpired(nameHash: self.nameHash) == false : "Domain is expired"  // Ask
+            }
+            self.address = addr
+            emit DomainAddressChanged(nameHash: self.nameHash, address: addr)
         }
+
+        pub fun getInfo(): DomainInfo {
+            let owner = Domains.owners[self.nameHash]! 
+
+            return DomainInfo(
+              id: self.id,
+              owner: owner,
+              name: self.getDomainName(),
+              nameHash: self.nameHash,
+              expiresAt: Domains.expirationTimes[self.nameHash]!,
+              address: self.address,
+              bio: self.bio,
+              createdAt: self.createdAt
+            )
+        }
+
     }
 }
