@@ -10,6 +10,9 @@ pub contract Domains: NonFungibleToken {
     pub event DomainBioChanged(nameHash: String, bio: String)
     pub event DomainAddressChanged(nameHash: String, address: Address)
 
+    pub event Withdraw(id: UInt64, from: Address?)
+    pub event Deposit(id: UInt64, to: Address?)
+
 /************************************ Global (immutable) variables *************************************/
     pub let owners: {String: Address}  // nameHash will be the key
     pub let expirationTimes: {String: UFix64}
@@ -181,7 +184,71 @@ pub contract Domains: NonFungibleToken {
               createdAt: self.createdAt
             )
         }
-//********************************************** Finish NFT resource implementation ********************************************************/
+    }
+
+//********************************************** Collection resource interfaces ********************************************************/
+    pub resource interface CollectionPublic {
+        pub fun borrowDomain(id: UInt64): &{Domains.DomainPublic}
+    }
+
+    pub resource interface CollectionPrivate {
+        acces(account) fun mintDomain(name: String, nameHash: String, expiresAt: UFix64, receiver: Capability<@{NonFungibleToken.Receiver}>)
+        pub fun borrowDomainPrivate(id: UInt64): &Domains.NFT
+    }
+
+//********************************************** Collection resource implementation ********************************************************/
+    pub resource Collection: CollectionPublic, CollectionPrivate, NonFungibleToken.Provider, NonFungibleToken.Receiver, NonFungibleToken.CollectionPublic {
+        pub var ownedNFTs: @{UInt64: NonFungibleToken.NFT}
+
+        init() {
+          // Initialize as an empty resource
+          self.ownedNFTs <- {}
+        }
+
+        // NonFungibleToken.Provider
+        /* You have to think of this as a user interacting with their personal NFT collection stored in their account storage. 
+           They get access to their collection, call the withdraw function on it, get access to a specific NFT resource, 
+           and then do whatever they want with it. */
+        pub fun withdraw(withdrawID: UInt64): @NonFungibleToken.NFT {
+          let domain <- self.ownedNFTs.remove(key: withdrawID)
+              ?? panic("NFT not found in collection")
+          emit Withdraw(id: domain.id, from: self.owner?.address)
+          return domain
+        }
+
+        // NonFungibleToken.Receiver
+        pub fun deposit(token: @NonFungibleToken.NFT) {
+          // Typecast the generic NFT resource as a Domains.NFT resouce
+          let domain <- token as! @Domains.NFT
+          let id = domain.id
+          let nameHash = domain.nameHash
+
+          if Domains.isExpired(nameHash: nameHash) {
+            panic("Domain is expired")
+          }
+
+          Domains.updateOwner(nameHash: nameHash, address: self.owner?.address)
+          let oldToken <- self.ownedNFTs[id] <- domain
+          emit Deposit(id: id, to: self.owner?.address)
+
+          destroy oldToken
+        }
+
+        // NonFungibleToken.CollectionPublic
+        pub fun getIDs(): [UInt64] {
+          // Not possible in Solidity
+          return self.ownedNFTs.keys
+        }
+
+        pub fun borrowNFT(id: UInt64): &NonFungibleToken.NFT {
+          return (&self.ownedNFTs[id] as &NonFungibleToken.NFT?)!
+        }
+
+        
+
+
+
+
     }
 
 }
