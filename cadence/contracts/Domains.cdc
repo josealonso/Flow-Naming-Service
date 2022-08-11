@@ -54,4 +54,49 @@ pub contract Domains: NonFungibleToken {
         pub fun setAddress(addr: Address)
     }
 
+    pub resource NFT: DomainPublic, DomainPrivate, DomainInfo, NonFungibleToken.INFT {
+        pub let id: UInt64
+        pub let name: String
+        pub let nameHash: String
+        pub let createdAt: UFix64  
+
+        // access(self) implies that only the code within this resource
+        // can read/modify this variable directly
+        // This is similar to `private` in Solidity
+        access(self) var address: Address?
+        access(self) var bio: String
+
+        init(id: UInt64, name: String, nameHash: String) {
+            self.id = id,
+            self.name = name,
+            self.nameHash = nameHash,
+            self.createdAt = getCurrentBlock().timestamp
+            self.address = nil
+            self.bio = ""
+        }
+
+        pub fun getBio(): String {
+            return self.bio
+        }
+
+        pub fun getAddress(): Address? {
+            return self.address
+        }
+        pub fun getDomainName(): String {
+            return self.name.concat(".fns")
+        }
+        pub fun getInfo(): DomainInfo {
+            return 
+        }
+
+        pub fun setBio(bio: String) {
+            // Ensure that the domain has not crossed its expire date
+            return 
+        }
+
+        pub fun setAddress(addr: Address) {
+            // Ensure that the domain has not crossed its expire date
+            return 
+        }
+    }
 }
