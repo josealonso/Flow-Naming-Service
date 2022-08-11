@@ -6,12 +6,15 @@ import FlowToken from "./tokens/FlowToken.cdc"
 // to be used by flow-name-service
 pub contract Domains: NonFungibleToken {
 
+/************************************************ Events **********************************************/
     pub event DomainBioChanged(nameHash: String, bio: String)
     pub event DomainAddressChanged(nameHash: String, address: Address)
 
+/************************************ Global (immutable) variables *************************************/
     pub let owners: {String: Address}  // nameHash will be the key
     pub let expirationTimes: {String: UFix64}
     
+/************************************************ Structure ********************************************/    
     pub struct DomainInfo {
         pub let id: UInt64
         pub let owner: Address
@@ -23,14 +26,14 @@ pub contract Domains: NonFungibleToken {
         pub let createdAt: UFix64
 
         // Struct initializer
-        init(
+        init(   // Ask
             id: UInt64,
             owner: Address,
             name: String,
             nameHash: String,
             expiresAt: UFix64,
             address: Address?,
-            bio: String,
+            bio: String, 
             createdAt: UFix64,
         ) {
             self.id = id,
@@ -44,6 +47,7 @@ pub contract Domains: NonFungibleToken {
         }        
     }
 
+/************************************************ Funtions *********************************************/
     // Checks if a domain is available for sale
     pub fun isAvailable(nameHash: String): Bool {
       if self.owners[nameHash] == nil {
@@ -90,11 +94,12 @@ pub contract Domains: NonFungibleToken {
       self.expirationTimes[nameHash] = expTime
     }
 
+//********************************************** Start NFT resource interfaces ********************************************************/
     pub resource interface DomainPublic {
         pub let id: UInt64
         pub let name: String
         pub let nameHash: String
-        pub let createdAt: UFix64   // and espiresAt ?
+        pub let createdAt: UFix64   // and expiresAt ?
 
         pub fun getBio(): String
         pub fun getAddress(): Address?
@@ -106,7 +111,9 @@ pub contract Domains: NonFungibleToken {
         pub fun setBio(bio: String)
         pub fun setAddress(addr: Address)
     }
+//********************************************** Finish NFT resource interfaces ********************************************************/
 
+//********************************************** Start NFT resource implementation ********************************************************/
     pub resource NFT: DomainPublic, DomainPrivate, DomainInfo, NonFungibleToken.INFT {
         pub let id: UInt64
         pub let name: String
@@ -132,16 +139,6 @@ pub contract Domains: NonFungibleToken {
             return self.bio
         }
 
-        pub fun getAddress(): Address? {
-            return self.address
-        }
-        pub fun getDomainName(): String {
-            return self.name.concat(".fns")
-        }
-        pub fun getInfo(): DomainInfo {
-            return 
-        }
-
         pub fun setBio(bio: String) {
             // Ensure that the domain has not crossed its expire date
             // A 'pre'-check to running this function
@@ -153,6 +150,10 @@ pub contract Domains: NonFungibleToken {
             emit DomainBioChanged(nameHash: self.nameHash, bio: bio)
         }
 
+        pub fun getAddress(): Address? {
+            return self.address
+        }
+
         pub fun setAddress(addr: Address) {
             // Ensure that the domain has not crossed its expire date
             pre {
@@ -160,6 +161,10 @@ pub contract Domains: NonFungibleToken {
             }
             self.address = addr
             emit DomainAddressChanged(nameHash: self.nameHash, address: addr)
+        }
+
+        pub fun getDomainName(): String {
+            return self.name.concat(".fns")
         }
 
         pub fun getInfo(): DomainInfo {
@@ -176,6 +181,7 @@ pub contract Domains: NonFungibleToken {
               createdAt: self.createdAt
             )
         }
-
+//********************************************** Finish NFT resource implementation ********************************************************/
     }
+
 }
