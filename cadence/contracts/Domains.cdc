@@ -14,6 +14,9 @@ pub contract Domains: NonFungibleToken {
     pub event Deposit(id: UInt64, to: Address?)
     pub event DomainMinted(id: UInt64, name: String, nameHash: String, expiresAt: UFix64, receiver: Address)
 
+    // Events to emit when a domain is renewed and rented for longer
+    pub event DomainRenewed(id: UInt64, name: String, nameHash: String, expiresAt: UFix64, receiver: Address)
+
 /**************************************** Global variables ********************************************/
     pub let owners: {String: Address}  // nameHash will be the key
     pub let expirationTimes: {String: UFix64}
@@ -22,6 +25,14 @@ pub contract Domains: NonFungibleToken {
     pub let nameHashToIDs: {String: UInt64}
     // A counter to keep track of how many domains have been minted
     pub var totalSupply: UInt64    
+
+    // Defines forbidden characters within domain names - such as .
+    pub let forbiddenChars: String
+    // Defines the minimum duration a domain must be rented for
+    pub let minRentDuration: UFix64
+    // Defines the maximum length of the domain name (not including .fns)
+    pub let maxDomainLength: Int
+
 /************************************************ Structure ********************************************/    
     pub struct DomainInfo {
         pub let id: UInt64
@@ -304,5 +315,10 @@ pub contract Domains: NonFungibleToken {
         } 
 
     }
+
+//************************************************** Registrar resource interfaces ********************************************************/
+
+//************************************************** Registrar resource implementation ****************************************************/
+
 
 }
