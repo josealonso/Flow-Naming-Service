@@ -138,6 +138,122 @@ pub contract Domains: NonFungibleToken {
       return nameHash
     }
 
+    /********************* Global functions ********************************/
+    pub fun createEmptyCollection(): @NonFungibleToken.Collection {
+      let collection <- create Collection()
+      return <- collection
+    }
+
+    pub fun getRentCost(name: String, duration: UFix64): UFix64 {
+      var len = name.length
+      if len > 10 {
+        len = 10
+      } 
+      let price = self.getPrices()[len]
+      let rentCost = price! * duration
+      return rentCost
+    }
+
+    //******************** Used by the Initializer **************/
+    // Storage, Public, and Private paths for Domains.Collection resource
+    pub let DomainsStoragePath: StoragePath
+    pub let DomainsPrivatePath: PrivatePath
+    pub let DomainsPublicPath: PublicPath
+
+    // Storage, Public, and Private paths for Domains.Registrar resource
+    pub let RegistrarStoragePath: StoragePath
+    pub let RegistrarPrivatePath: PrivatePath
+    pub let RegistrarPublicPath: PublicPath
+
+    // Event that implies a contract has been initialized
+    // Required by the NonFungibleToken standard
+    pub event ContractInitialized()
+
+    pub fun getVaultBalance(): UFix64 {
+      let cap = self.account.getCapability<&Domains.Registrar{Domains.RegistrarPublic}>(Domains.RegistrarPublicPath)
+      let registrar = cap.borrow() ?? panic("Could not borrow registrar public")
+      return registrar.getVaultBalance()
+    }
+
+    pub fun registerDomain(name: String, duration: UFix64, feeTokens: @FungibleToken.Vault, receiver: Capability<&{NonFungibleToken.Receiver}>) {
+      let cap = self.account.getCapability<&Domains.Registrar{Domains.RegistrarPublic}>(self.RegistrarPublicPath)
+      let registrar = cap.borrow() ?? panic("Could not borrow registrar")
+      registrar.registerDomain(name: name, duration: duration, feeTokens: <- feeTokens, receiver: receiver)
+    }
+
+    pub fun renewDomain(domain: &Domains.NFT, duration: UFix64, feeTokens: @FungibleToken.Vault) {
+      let cap = self.account.getCapability<&Domains.Registrar{Domains.RegistrarPublic}>(self.RegistrarPublicPath)
+      let registrar = cap.borrow() ?? panic("Could not borrow registrar")
+      registrar.renewDomain(domain: domain, duration: duration, feeTokens: <- feeTokens)
+    }
+
+//******************** The Initializer **************/
+    init() {
+      self.owners = {}
+      self.expirationTimes = {}
+      self.nameHashToIDs = {}
+
+      // Define forbidden characters for domain names
+      self.forbiddenChars = "!@#$%^&*()<>? ./"
+      // Initialize total supply to 0
+      self.totalSupply = 0
+
+      // Set the various paths to store `Domains.Collection` at in a user's account storage
+      self.DomainsStoragePath = StoragePath(identifier: "flowNameServiceDomains") ?? panic("Could not set storage path")
+      self.DomainsPrivatePath = PrivatePath(identifier: "flowNameServiceDomains") ?? panic("Could not set private path")
+      self.DomainsPublicPath = PublicPath(identifier: "flowNameServiceDomains") ?? panic("Could not set public path")
+
+      // Set the various paths to store `Domains.Registrar` in the admin account's storage
+      self.RegistrarStoragePath = StoragePath(identifier: "flowNameServiceRegistrar") ?? panic("Could not set storage path")
+      self.RegistrarPrivatePath = PrivatePath(identifier: "flowNameServiceRegistrar") ?? panic("Could not set private path")
+      self.RegistrarPublicPath = PublicPath(identifier: "flowNameServiceRegistrar") ?? panic("Could not set public path")
+
+      // Here's the fun stuff
+    
+      // self.account refers to the account where the smart contract lives, i.e. the admin account
+    
+      // 1. Create an empty Domains.Collection resource
+    // 2. Save it to the admin account's storage path
+    self.account.save(<- self.createEmptyCollection(), to: Domains.DomainsStoragePath)
+   
+    // 3. Link the Public resource interfaces that we are okay sharing with third-parties
+    // to the public account storage from the main storage path
+    // All objects in public paths can be accessed by anyone
+    self.account.link<&Domains.Collection{NonFungibleToken.CollectionPublic, NonFungibleToken.Receiver, Domains.CollectionPublic}>
+        (self.DomainsPublicPath, target: self.DomainsStoragePath)
+    
+    // 4. Link the overall resource (public + private) to the private storage path from the main storage path
+    // This allows us to create capabilities if necessary.
+    // This is needed because Capabilities can only be created from public or private paths, not from the main storage path
+    // for security reasons
+    self.account.link<&Domains.Collection>(self.DomainsPrivatePath, target: self.DomainsStoragePath)
+
+    // Now, get a capability from the private path for Domains.Collection from the admin account
+    // We will pass this onto the Registrar resource (to be created)
+    // So it has access to the Private functions within Domains.Collection, specifically, `mintDomain`
+    let collectionCapability = self.account.getCapability<&Domains.Collection>(self.DomainsPrivatePath)
+    
+    // Create an empty FungibleToken.Vault for the FlowToken
+    // This is the one and only time we utilize the FlowToken import
+    let vault <- FlowToken.createEmptyVault()
+    // Create a Registrar resource, and give it the Vault 
+    // and the Private Collection Capability
+    let registrar <- create Registrar(vault: <- vault, collection: collectionCapability)
+    
+    // Now save the Registrar resource in the admin account's main storage path
+    self.account.save(<- registrar, to: self.RegistrarStoragePath)
+   
+    // Link the Public portion of the Registrar to the public path
+    // for the Registrar resource
+    self.account.link<&Domains.Registrar{Domains.RegistrarPublic}>(self.RegistrarPublicPath, target: self.RegistrarStoragePath)
+    // Link the overall resource (public + private) to the 
+    // private path for the Registrar Resource
+    self.account.link<&Domains.Registrar>(self.RegistrarPrivatePath, target: self.RegistrarStoragePath)
+
+      // Emit the ContractInitialized event
+      emit ContractInitialized()
+    }
+
 //********************************************** Start NFT resource interfaces ********************************************************/
     pub resource interface DomainPublic {
         pub let id: UInt64
