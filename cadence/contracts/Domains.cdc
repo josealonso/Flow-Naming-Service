@@ -12,11 +12,16 @@ pub contract Domains: NonFungibleToken {
 
     pub event Withdraw(id: UInt64, from: Address?)
     pub event Deposit(id: UInt64, to: Address?)
+    pub event DomainMinted(id: UInt64, name: String, nameHash: String, expiresAt: UFix64, receiver: Address)
 
-/************************************ Global (immutable) variables *************************************/
+/**************************************** Global variables ********************************************/
     pub let owners: {String: Address}  // nameHash will be the key
     pub let expirationTimes: {String: UFix64}
-    
+
+    // A mapping for domain nameHash -> domain ID
+    pub let nameHashToIDs: {String: UInt64}
+    // A counter to keep track of how many domains have been minted
+    pub var totalSupply: UInt64    
 /************************************************ Structure ********************************************/    
     pub struct DomainInfo {
         pub let id: UInt64
@@ -95,6 +100,16 @@ pub contract Domains: NonFungibleToken {
     // Update the expiration time of a domain
     access(account) fun updateExpirationTime(nameHash: String, expTime: UFix64) {
       self.expirationTimes[nameHash] = expTime
+    }
+
+    /********************* Helper functions for the Collection resource ********************************/
+
+    pub fun getAllNameHashToIds(): {String: UInt64} {
+      return self.nameHashToIDs
+    }
+
+    access(account) fun updateNameHashToID(nameHash: String, id: UInt64) {
+      self.nameHashToIDs[nameHash] = id
     }
 
 //********************************************** Start NFT resource interfaces ********************************************************/
@@ -213,7 +228,7 @@ pub contract Domains: NonFungibleToken {
           let domain <- self.ownedNFTs.remove(key: withdrawID)
               ?? panic("NFT not found in collection")
           emit Withdraw(id: domain.id, from: self.owner?.address)
-          return domain
+          return <- domain
         }
 
         // NonFungibleToken.Receiver
@@ -244,10 +259,49 @@ pub contract Domains: NonFungibleToken {
           return (&self.ownedNFTs[id] as &NonFungibleToken.NFT?)!
         }
 
-        
+        // Domains.CollectionPublic
+        pub fun borrowDomain(id: UInt64): &{Domains.DomainPublic} {
+          pre {
+            self.ownedNFTs[id] != nil : "Domain does not exist"
+          }
 
+          let token = (&self.ownedNFTs[id] as auth &NonFungibleToken.NFT?)!
+          return token as! &Domains.NFT
+        }
 
+        // Domains.CollectionPrivate
+        access(account) fun mintDomain(name: String, nameHash: String, expiresAt: UFix64, receiver: Capability<&{NonFungibleToken.Receiver}>) {
+          pre {
+            Domains.isAvailable(nameHash: nameHash) : "Domain not available"
+          }
 
+          let domain <- create Domains.NFT(
+            id: Domains.totalSupply,
+            name: name,
+            nameHash: nameHash
+          )
+
+          Domains.updateOwner(nameHash: nameHash, address: receiver.address)
+          Domains.updateExpirationTime(nameHash: nameHash, expTime: expiresAt)
+          Domains.updateNameHashToID(nameHash: nameHash, id: domain.id)
+          Domains.totalSupply = Domains.totalSupply + 1
+
+          emit DomainMinted(id: domain.id, name: name, nameHash: nameHash, expiresAt: expiresAt, receiver: receiver.address)
+
+          receiver.borrow()!.deposit(token: <- domain)
+        }
+
+        pub fun borrowDomainPrivate(id: UInt64): &Domains.NFT {
+          pre {
+            self.ownedNFTs[id] != nil: "Domain does not exist"
+          }
+          let ref = (&self.ownedNFTs[id] as auth &NonFungibleToken.NFT?)!
+          return ref as! &Domains.NFT
+        }
+
+        destroy() {
+          destroy self.ownedNFTs
+        } 
 
     }
 
