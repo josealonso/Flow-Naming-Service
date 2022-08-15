@@ -1,14 +1,4 @@
-This is a [Flow](http://onflow.org/) project scaffolded with [flow-app-scafold](https://github.com/onflow/flow-app-scaffold).
-
-## Getting Started
-
-1. [Install the Flow CLI](https://github.com/onflow/flow-cli).
-
-2. Start the emulator.
-
-```bash
-flow emulator
-```
+## Flow Name Service
 
 ### Creating a testnet account
 
@@ -26,10 +16,35 @@ https://testnet-faucet.onflow.org/?key=<PUBLIC_KEY>
 ```
 flow config add acccount
 ```
+
 A new account is added under the `accounts` property of the `flow.json` object.
 
-## Add contract paths and aliases
+### Add contract paths and aliases
 
 ```
 flow config add contract
 ```
+
+Added three different contracts: `FungibleToken.cdc`, `NonFungibleToken.cdc` and `Domains.cdc`
+
+### Configure the deployment
+
+```
+flow config add deployment
+```
+
+- Choose `testnet` network, `testnet` account and `Domains` contract.
+
+- After all the process ---> `Deployment added to the configuration.`
+
+- Notice the `deployments` property has been added to the JSON object.
+
+### Actually deploy
+
+```
+flow project deploy --network=testnet
+```
+
+
+
+

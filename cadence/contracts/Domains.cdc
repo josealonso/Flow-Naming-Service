@@ -5,30 +5,31 @@ import FlowToken from "./tokens/FlowToken.cdc"
 // The Domains contract defines the Domains NFT Collection
 // to be used by flow-name-service
 pub contract Domains: NonFungibleToken {
+    pub let forbiddenChars: String
+    // nameHash will be the key
+    pub let owners: {String: Address}  
+    pub let expirationTimes: {String: UFix64}
+    // A mapping for domain nameHash -> domain ID
+    pub let nameHashToIDs: {String: UInt64}
+    // A counter to keep track of how many domains have been minted
+    pub var totalSupply: UInt64    
+
+    pub let DomainsStoragePath: StoragePath
+    pub let DomainsPrivatePath: PrivatePath
+    pub let DomainsPublicPath: PublicPath
+    pub let RegistrarStoragePath: StoragePath
+    pub let RegistrarPrivatePath: PrivatePath
+    pub let RegistrarPublicPath: PublicPath
 
 /************************************************ Events **********************************************/
+    // Required by the NonFungibleToken standard
+    pub event ContractInitialized()
     pub event DomainBioChanged(nameHash: String, bio: String)
     pub event DomainAddressChanged(nameHash: String, address: Address)
     pub event Withdraw(id: UInt64, from: Address?)
     pub event Deposit(id: UInt64, to: Address?)
     pub event DomainMinted(id: UInt64, name: String, nameHash: String, expiresAt: UFix64, receiver: Address)
     pub event DomainRenewed(id: UInt64, name: String, nameHash: String, expiresAt: UFix64, receiver: Address)
-
-/**************************************** Global variables ********************************************/
-    pub let owners: {String: Address}  // nameHash will be the key
-    pub let expirationTimes: {String: UFix64}
-
-    // A mapping for domain nameHash -> domain ID
-    pub let nameHashToIDs: {String: UInt64}
-    // A counter to keep track of how many domains have been minted
-    pub var totalSupply: UInt64    
-
-    // Defines forbidden characters within domain names - such as .
-    pub let forbiddenChars: String
-    // Defines the minimum duration a domain must be rented for
-    pub let minRentDuration: UFix64
-    // Defines the maximum length of the domain name (not including .fns)
-    pub let maxDomainLength: Int
 
 //******************** The Initializer **************/
     init() {
@@ -54,14 +55,9 @@ pub contract Domains: NonFungibleToken {
       // Here's the fun stuff
     
       // self.account refers to the account where the smart contract lives, i.e. the admin account
-    
       // 1. Create an empty Domains.Collection resource
       // 2. Save it to the admin account's storage path
       self.account.save(<- self.createEmptyCollection(), to: Domains.DomainsStoragePath)
-   
-      // 3. Link the Public resource interfaces that we are okay sharing with third-parties
-      // to the public account storage from the main storage path
-      // All objects in public paths can be accessed by anyone
       self.account.link<&Domains.Collection{NonFungibleToken.CollectionPublic, NonFungibleToken.Receiver, Domains.CollectionPublic}>
         (self.DomainsPublicPath, target: self.DomainsStoragePath)
     
@@ -75,25 +71,11 @@ pub contract Domains: NonFungibleToken {
       // We will pass this onto the Registrar resource (to be created)
       // So it has access to the Private functions within Domains.Collection, specifically, `mintDomain`
       let collectionCapability = self.account.getCapability<&Domains.Collection>(self.DomainsPrivatePath)
-    
-      // Create an empty FungibleToken.Vault for the FlowToken
-      // This is the one and only time we utilize the FlowToken import
       let vault <- FlowToken.createEmptyVault()
-      // Create a Registrar resource, and give it the Vault 
-      // and the Private Collection Capability
       let registrar <- create Registrar(vault: <- vault, collection: collectionCapability)
-    
-      // Now save the Registrar resource in the admin account's main storage path
       self.account.save(<- registrar, to: self.RegistrarStoragePath)
-   
-      // Link the Public portion of the Registrar to the public path
-      // for the Registrar resource
       self.account.link<&Domains.Registrar{Domains.RegistrarPublic}>(self.RegistrarPublicPath, target: self.RegistrarStoragePath)
-      // Link the overall resource (public + private) to the 
-      // private path for the Registrar Resource
       self.account.link<&Domains.Registrar>(self.RegistrarPrivatePath, target: self.RegistrarStoragePath)
-
-      // Emit the ContractInitialized event
       emit ContractInitialized()
     }
 
@@ -109,7 +91,7 @@ pub contract Domains: NonFungibleToken {
         pub let createdAt: UFix64
 
         // Struct initializer
-        init(   // Ask
+        init(
             id: UInt64,
             owner: Address,
             name: String,
@@ -119,145 +101,23 @@ pub contract Domains: NonFungibleToken {
             bio: String, 
             createdAt: UFix64,
         ) {
-            self.id = id,
-            self.owner = owner,
-            self.name = name,
-            self.nameHash = nameHash,
-            self.expiresAt = expiresAt,
-            self.address = address,
-            self.bio = bio,
-            self.createdAt = createdAt,
+            self.id = id
+            self.owner = owner
+            self.name = name
+            self.nameHash = nameHash
+            self.expiresAt = expiresAt
+            self.address = address
+            self.bio = bio
+            self.createdAt = createdAt
         }        
     }
-
-/************************************************ Funtions *********************************************/
-    // Checks if a domain is available for sale
-    pub fun isAvailable(nameHash: String): Bool {
-      if self.owners[nameHash] == nil {
-        return true
-    }
-      return self.isExpired(nameHash: nameHash)
-    }
-
-    // Returns the expiry time for a domain
-    pub fun getExpirationTime(nameHash: String): UFix64? {
-      return self.expirationTimes[nameHash]
-    }
-
-    // Checks if a domain is expired
-    pub fun isExpired(nameHash: String): Bool {
-      let currTime = getCurrentBlock().timestamp
-      let expTime = self.expirationTimes[nameHash]
-      if expTime != nil {
-        return currTime >= expTime!
-      }
-      return false
-    }
-
-    // Returns the entire `owners` dictionary
-    pub fun getAllOwners(): {String: Address} {
-      return self.owners
-    }
-
-    // Returns the entire `expirationTimes` dictionary
-    pub fun getAllExpirationTimes(): {String: UFix64} {
-      return self.expirationTimes
-    }
-
-    /*  NOTE access(self) allows the code within the smart contract to access that function/variable,
-             whereas access(account) allows the account to access the function/variable - which includes the code itself as well.
-    */
-    // Update the owner of a domain
-    access(account) fun updateOwner(nameHash: String, address: Address) {
-      self.owners[nameHash] = address
-    }
-
-    // Update the expiration time of a domain
-    access(account) fun updateExpirationTime(nameHash: String, expTime: UFix64) {
-      self.expirationTimes[nameHash] = expTime
-    }
-
-    /********************* Helper functions for the Collection resource ********************************/
-    pub fun getAllNameHashToIds(): {String: UInt64} {
-      return self.nameHashToIDs
-    }
-
-    access(account) fun updateNameHashToID(nameHash: String, id: UInt64) {
-      self.nameHashToIDs[nameHash] = id
-    }
-
-    /********************* Helper functions for the Registrar resource ********************************/
-    pub fun getDomainNameHash(name: String): String {
-      let forbiddenCharsUTF8 = self.forbiddenChars.utf8
-      let nameUTF8 = name.utf8
-
-      for char in forbiddenCharsUTF8 {
-        if nameUTF8.contains(char) {
-          panic("Illegal domain name")
-        }
-      }
-
-      // Calculate the SHA-256 hash, and encode it as a Hexadecimal string
-      let nameHash = String.encodeHex(HashAlgorithm.SHA3_256.hash(nameUTF8))
-      return nameHash
-    }
-
-    /********************* Global functions ********************************/
-    pub fun createEmptyCollection(): @NonFungibleToken.Collection {
-      let collection <- create Collection()
-      return <- collection
-    }
-
-    pub fun getRentCost(name: String, duration: UFix64): UFix64 {
-      var len = name.length
-      if len > 10 {
-        len = 10
-      } 
-      let price = self.getPrices()[len]
-      let rentCost = price! * duration
-      return rentCost
-    }
-
-    //******************** Used by the Initializer **************/
-    // Storage, Public, and Private paths for Domains.Collection resource
-    pub let DomainsStoragePath: StoragePath
-    pub let DomainsPrivatePath: PrivatePath
-    pub let DomainsPublicPath: PublicPath
-
-    // Storage, Public, and Private paths for Domains.Registrar resource
-    pub let RegistrarStoragePath: StoragePath
-    pub let RegistrarPrivatePath: PrivatePath
-    pub let RegistrarPublicPath: PublicPath
-
-    // Event that implies a contract has been initialized
-    // Required by the NonFungibleToken standard
-    pub event ContractInitialized()
-
-    pub fun getVaultBalance(): UFix64 {
-      let cap = self.account.getCapability<&Domains.Registrar{Domains.RegistrarPublic}>(Domains.RegistrarPublicPath)
-      let registrar = cap.borrow() ?? panic("Could not borrow registrar public")
-      return registrar.getVaultBalance()
-    }
-
-    pub fun registerDomain(name: String, duration: UFix64, feeTokens: @FungibleToken.Vault, receiver: Capability<&{NonFungibleToken.Receiver}>) {
-      let cap = self.account.getCapability<&Domains.Registrar{Domains.RegistrarPublic}>(self.RegistrarPublicPath)
-      let registrar = cap.borrow() ?? panic("Could not borrow registrar")
-      registrar.registerDomain(name: name, duration: duration, feeTokens: <- feeTokens, receiver: receiver)
-    }
-
-    pub fun renewDomain(domain: &Domains.NFT, duration: UFix64, feeTokens: @FungibleToken.Vault) {
-      let cap = self.account.getCapability<&Domains.Registrar{Domains.RegistrarPublic}>(self.RegistrarPublicPath)
-      let registrar = cap.borrow() ?? panic("Could not borrow registrar")
-      registrar.renewDomain(domain: domain, duration: duration, feeTokens: <- feeTokens)
-    }
-
 
 //********************************************** Start NFT resource interfaces ********************************************************/
     pub resource interface DomainPublic {
         pub let id: UInt64
         pub let name: String
         pub let nameHash: String
-        pub let createdAt: UFix64   // and expiresAt ?
+        pub let createdAt: UFix64
 
         pub fun getBio(): String
         pub fun getAddress(): Address?
@@ -269,10 +129,9 @@ pub contract Domains: NonFungibleToken {
         pub fun setBio(bio: String)
         pub fun setAddress(addr: Address)
     }
-//********************************************** Finish NFT resource interfaces ********************************************************/
 
 //********************************************** Start NFT resource implementation ********************************************************/
-    pub resource NFT: DomainPublic, DomainPrivate, DomainInfo, NonFungibleToken.INFT {
+    pub resource NFT: DomainPublic, DomainPrivate, NonFungibleToken.INFT {
         pub let id: UInt64
         pub let name: String
         pub let nameHash: String
@@ -285,9 +144,9 @@ pub contract Domains: NonFungibleToken {
         access(self) var bio: String
 
         init(id: UInt64, name: String, nameHash: String) {
-            self.id = id,
-            self.name = name,
-            self.nameHash = nameHash,
+            self.id = id
+            self.name = name
+            self.nameHash = nameHash
             self.createdAt = getCurrentBlock().timestamp
             self.address = nil
             self.bio = ""
@@ -347,7 +206,7 @@ pub contract Domains: NonFungibleToken {
     }
 
     pub resource interface CollectionPrivate {
-        acces(account) fun mintDomain(name: String, nameHash: String, expiresAt: UFix64, receiver: Capability<@{NonFungibleToken.Receiver}>)
+        access(account) fun mintDomain(name: String, nameHash: String, expiresAt: UFix64, receiver: Capability<&{NonFungibleToken.Receiver}>)
         pub fun borrowDomainPrivate(id: UInt64): &Domains.NFT
     }
 
@@ -382,7 +241,7 @@ pub contract Domains: NonFungibleToken {
             panic("Domain is expired")
           }
 
-          Domains.updateOwner(nameHash: nameHash, address: self.owner?.address)
+          Domains.updateOwner(nameHash: nameHash, address: self.owner!.address)
           let oldToken <- self.ownedNFTs[id] <- domain
           emit Deposit(id: id, to: self.owner?.address)
 
@@ -442,7 +301,6 @@ pub contract Domains: NonFungibleToken {
         destroy() {
           destroy self.ownedNFTs
         } 
-
     }
 
 //************************************************** Registrar resource interfaces ********************************************************/
@@ -465,7 +323,6 @@ pub contract Domains: NonFungibleToken {
 
 //************************************************** Registrar resource implementation ****************************************************/
     pub resource Registrar: RegistrarPublic, RegistrarPrivate {
-        // Variables defined in the interfaces
         pub let minRentDuration: UFix64
         pub let maxDomainLength: Int
         pub let prices: {Int: UFix64}
@@ -479,7 +336,7 @@ pub contract Domains: NonFungibleToken {
         // Only the account has access to it
         // We will use this to access the account-only `mintDomain` function
         // Within the Collection owned by our smart contract account
-        acces(account) var domainsCollection: Capability<&Domains.Collection>
+        access(account) var domainsCollection: Capability<&Domains.Collection>
 
         init(vault: @FungibleToken.Vault, collection: Capability<&Domains.Collection>) {
           // This represents 1 year in seconds
@@ -538,7 +395,6 @@ pub contract Domains: NonFungibleToken {
             let newExpTime = Domains.getExpirationTime(nameHash: domain.nameHash)! + duration
             Domains.updateExpirationTime(nameHash: domain.nameHash, expTime: newExpTime)
 
-            // emit the DomainRenewed event
             emit DomainRenewed(id: domain.id, name: domain.name, nameHash: domain.nameHash, expiresAt: newExpTime, receiver: domain.owner!.address)
         }
   
@@ -629,7 +485,127 @@ pub contract Domains: NonFungibleToken {
         }
     }
 
+/**************************************** Global Funtions *********************************************/
+    pub fun createEmptyCollection(): @NonFungibleToken.Collection {
+      let collection <- create Collection()
+      return <- collection
+    }
+
+    pub fun registerDomain(name: String, duration: UFix64, feeTokens: @FungibleToken.Vault, receiver: Capability<&{NonFungibleToken.Receiver}>) {
+      let cap = self.account.getCapability<&Domains.Registrar{Domains.RegistrarPublic}>(self.RegistrarPublicPath)
+      let registrar = cap.borrow() ?? panic("Could not borrow registrar")
+      registrar.registerDomain(name: name, duration: duration, feeTokens: <- feeTokens, receiver: receiver)
+    }
+
+    pub fun renewDomain(domain: &Domains.NFT, duration: UFix64, feeTokens: @FungibleToken.Vault) {
+      let cap = self.account.getCapability<&Domains.Registrar{Domains.RegistrarPublic}>(self.RegistrarPublicPath)
+      let registrar = cap.borrow() ?? panic("Could not borrow registrar")
+      registrar.renewDomain(domain: domain, duration: duration, feeTokens: <- feeTokens)
+    }
+
+    pub fun getRentCost(name: String, duration: UFix64): UFix64 {
+      var len = name.length
+      if len > 10 {
+        len = 10
+      } 
+      let price = self.getPrices()[len]
+      let rentCost = price! * duration
+      return rentCost
+    }
+
+    pub fun getDomainNameHash(name: String): String {
+      let forbiddenCharsUTF8 = self.forbiddenChars.utf8
+      let nameUTF8 = name.utf8
+
+      for char in forbiddenCharsUTF8 {
+        if nameUTF8.contains(char) {
+          panic("Illegal domain name")
+        }
+      }
+
+      // Calculate the SHA-256 hash, and encode it as a Hexadecimal string
+      let nameHash = String.encodeHex(HashAlgorithm.SHA3_256.hash(nameUTF8))
+      return nameHash
+    }
+
+    // Checks if a domain is available for sale
+    pub fun isAvailable(nameHash: String): Bool {
+      if self.owners[nameHash] == nil {
+        return true
+    }
+      return self.isExpired(nameHash: nameHash)
+    }
+
+    pub fun getPrices(): {Int: UFix64} {
+      let cap = self.account.getCapability<&Domains.Registrar{Domains.RegistrarPublic}>(Domains.RegistrarPublicPath)
+      let collection = cap.borrow() ?? panic("Could not borrow collection")
+      return collection.getPrices()
+    }
+
+    // Storage, Public, and Private paths for Domains.Collection resource
+    pub fun getVaultBalance(): UFix64 {
+      let cap = self.account.getCapability<&Domains.Registrar{Domains.RegistrarPublic}>(Domains.RegistrarPublicPath)
+      let registrar = cap.borrow() ?? panic("Could not borrow registrar public")
+      return registrar.getVaultBalance()
+    }
+
+    // Returns the expiry time for a domain
+    pub fun getExpirationTime(nameHash: String): UFix64? {
+      return self.expirationTimes[nameHash]
+    }
+
+    // Checks if a domain is expired
+    pub fun isExpired(nameHash: String): Bool {
+      let currTime = getCurrentBlock().timestamp
+      let expTime = self.expirationTimes[nameHash]
+      if expTime != nil {
+        return currTime >= expTime!
+      }
+      return false
+    }
+
+    // Returns the entire `owners` dictionary
+    pub fun getAllOwners(): {String: Address} {
+      return self.owners
+    }
+
+    // Returns the entire `expirationTimes` dictionary
+    pub fun getAllExpirationTimes(): {String: UFix64} {
+      return self.expirationTimes
+    }
+
+    pub fun getAllNameHashToIds(): {String: UInt64} {
+      return self.nameHashToIDs
+    }
+
+    /*  NOTE access(self) allows the code within the smart contract to access that function/variable,
+             whereas access(account) allows the account to access the function/variable - which includes the code itself as well.
+    */
+    // Update the owner of a domain
+    access(account) fun updateOwner(nameHash: String, address: Address) {
+      self.owners[nameHash] = address
+    }
+
+    // Update the expiration time of a domain
+    access(account) fun updateExpirationTime(nameHash: String, expTime: UFix64) {
+      self.expirationTimes[nameHash] = expTime
+    }
+
+    access(account) fun updateNameHashToID(nameHash: String, id: UInt64) {
+      self.nameHashToIDs[nameHash] = id
+    }
+
 }
+
+    /********************* Helper functions for the Collection resource ********************************/
+
+///////////////
+
+    // Defines the minimum duration a domain must be rented for
+    // pub let minRentDuration: UFix64
+    // Defines the maximum length of the domain name (not including .fns)
+    // pub let maxDomainLength: Int
+
 
 
 
